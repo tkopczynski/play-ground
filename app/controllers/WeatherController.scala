@@ -2,6 +2,7 @@ package controllers
 
 import javax.inject.{Inject, Singleton}
 
+import models.QueriesLogRepository
 import play.api.cache.AsyncCacheApi
 import play.api.libs.json.Json
 import play.api.libs.ws.WSClient
@@ -14,16 +15,17 @@ import scala.concurrent.ExecutionContext.Implicits.global
   * Created by Tomasz Kopczynski.
   */
 @Singleton
-class WeatherController @Inject()(cc: ControllerComponents, ws: WSClient, config: Configuration, cache: AsyncCacheApi) extends AbstractController(cc) {
+class WeatherController @Inject()(cc: ControllerComponents, ws: WSClient, config: Configuration, cache: AsyncCacheApi, queriesLogRepository: QueriesLogRepository) extends AbstractController(cc) {
 
-  def locateEndpoint: String = config.get[String]("api.weather.locate")
+  private val locateEndpoint = config.get[String]("api.weather.locate")
 
-  def locationWeatherEndpoint: String = config.get[String]("api.weather.locationWeather")
+  private val locationWeatherEndpoint = config.get[String]("api.weather.locationWeather")
 
-  def logger: Logger = Logger(this.getClass.getSimpleName)
+  private val logger = Logger(this.getClass.getSimpleName)
 
   def weather(city: String): Action[AnyContent] = Action.async { implicit request: Request[AnyContent] =>
-    val locationWoeid = cache.getOrElseUpdate[String](s"location.$city") {
+    val locationWoeid = queriesLogRepository.create(city)
+        .flatMap(_ => cache.getOrElseUpdate[String](s"location.$city") {
       logger.info("querying for location woeid")
       ws.url(locateEndpoint).addQueryStringParameters("query" -> city).get()
         .map {
@@ -31,7 +33,7 @@ class WeatherController @Inject()(cc: ControllerComponents, ws: WSClient, config
         }
         .map(_.as[Int])
         .map(String.valueOf)
-    }
+    })
 
     locationWoeid.flatMap { woeid =>
       ws.url(s"$locationWeatherEndpoint/$woeid").get()
